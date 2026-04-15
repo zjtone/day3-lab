@@ -169,9 +169,41 @@ function demoAnswer(query) {
 
 async function agentAsk(query) {
   const start = Date.now();
-  let result = await callCoPaw(query);
-  if (!result) result = await callBailian(query);
-  if (!result) result = demoAnswer(query);
+
+  // 读取研报作为上下文
+  let reportContext = '';
+  let topReports = [];
+  try {
+    const reports = readJSON(REPORTS_FILE);
+    const doneReports = reports.filter(r => r.status === 'done' && r.content_text);
+    const SOURCE_PRIORITY = { 'upload': 1, 'api': 2, 'url': 3 };
+    doneReports.sort((a, b) => (SOURCE_PRIORITY[a.source] || 999) - (SOURCE_PRIORITY[b.source] || 999));
+    topReports = doneReports.slice(0, 3);
+    if (topReports.length > 0) {
+      reportContext = topReports
+        .map(r => `【${r.title}】(来源:${r.source})\n${(r.content_text || '').slice(0, 2000)}`)
+        .join('\n---\n');
+    }
+  } catch (e) {
+    console.log('[agentAsk] 读取研报失败:', e.message);
+  }
+
+  const enhancedQuery = reportContext
+    ? `参考以下研报资料:\n${reportContext}\n\n用户问题: ${query}`
+    : query;
+
+  let result = await callCoPaw(enhancedQuery);
+  if (!result) result = await callBailian(enhancedQuery);
+  if (!result) result = demoAnswer(query); // Demo 模式用原始 query
+
+  // 如果使用了研报上下文，在回答末尾追加来源溯源信息
+  if (reportContext && result.answer && topReports && topReports.length > 0) {
+    const sourceInfo = topReports.map(r =>
+      `- \u{1F4C4} ${r.title}\uFF08\u6765\u6E90: ${r.source === 'upload' ? '\u7528\u6237\u4E0A\u4F20' : r.source === 'url' ? '\u7F51\u9875\u5BFC\u5165' : 'API\u62C9\u53D6'}\uFF0C\u5BFC\u5165\u65F6\u95F4: ${new Date(r.created_at).toLocaleDateString('zh-CN')}\uFF09`
+    ).join('\n');
+    result.answer += `\n\n---\n**\u{1F4CB} \u7814\u62A5\u6765\u6E90**\n${sourceInfo}`;
+  }
+
   result.response_time_ms = Date.now() - start;
   result.stocks = identifyStocks(result.answer);
   return result;

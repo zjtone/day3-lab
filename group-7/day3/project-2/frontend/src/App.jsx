@@ -9,6 +9,8 @@ import {
   uploadReport, importReportUrl, getReports, deleteReport,
   compareReports, exportComparison, getSentiment,
 } from './api';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import './App.css';
 
 // ── 股票标签组件 ──
@@ -22,7 +24,7 @@ function StockTag({ name, code, onStockClick }) {
 
 // ── 回答文本：内嵌股票标签渲染 ──
 function AnswerText({ text, stocks, onStockClick }) {
-  if (!stocks || stocks.length === 0) return <span className="answer-text">{text}</span>;
+  if (!stocks || stocks.length === 0) return <div className="answer-text markdown-body"><ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown></div>;
   // 替换股票名称/代码为可点击标签
   let parts = [text];
   stocks.forEach(({ name, code }) => {
@@ -38,7 +40,8 @@ function AnswerText({ text, stocks, onStockClick }) {
     });
     parts = newParts;
   });
-  return <span className="answer-text">{parts}</span>;
+  // When stocks are present, render text parts with markdown and stock tags
+  return <div className="answer-text markdown-body">{parts.map((part, idx) => typeof part === 'string' ? <ReactMarkdown key={idx} remarkPlugins={[remarkGfm]}>{part}</ReactMarkdown> : part)}</div>;
 }
 
 // ── 来源标签 ──
@@ -49,14 +52,14 @@ function SourceBadge({ source, llmUsed }) {
 }
 
 // ── 相似提问弹窗 ──
-function SimilarModal({ records, onViewHistory, onNewAsk, onClose }) {
+function SimilarModal({ records, onViewHistory, onNewAsk, onClose, onRecordClick }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h3>发现相似历史提问</h3>
         <div className="similar-list">
           {records.map((r, i) => (
-            <div key={i} className="similar-item">
+            <div key={i} className="similar-item" style={{ cursor: 'pointer' }} onClick={() => onRecordClick?.(r)}>
               <p className="similar-q">Q: {r.query}</p>
               <p className="similar-a">A: {r.answer?.slice(0, 100)}...</p>
               <small>相似度: {(r._similarity * 100).toFixed(0)}%</small>
@@ -236,7 +239,7 @@ function ComparePanel({ reports, onClose, setError: setErr }) {
         <div className="compare-report-list">
           {reports.map((r) => (
             <label key={r.id} className="compare-report-check">
-              <input type="checkbox" checked={selectedIds.includes(r.id)} onChange={() => toggleId(r.id)} />
+              <input type="checkbox" checked={selectedIds.includes(r.report_id)} onChange={() => toggleId(r.report_id)} />
               <span>{r.title}</span>
             </label>
           ))}
@@ -304,6 +307,7 @@ export default function App() {
   const [reportUploading, setReportUploading] = useState(false);
   const [showComparePanel, setShowComparePanel] = useState(false);
   const [sentimentData, setSentimentData] = useState(null);
+  const [uploadedReport, setUploadedReport] = useState(null); // 刚上传成功的研报（触发确认弹窗）
 
   // ── 初始化：加载能力 + 会话列表 ──
   useEffect(() => {
@@ -381,13 +385,15 @@ export default function App() {
     doSend(q);
   }, [query, currentSession, loading]);
 
-  const doSend = (q) => {
+  const doSend = (q, sessionId) => {
+    const sid = sessionId || currentSession?.session_id;
+    if (!sid) return;
     setLoading(true);
     setStreamingAnswer('');
     // 添加临时问题卡片
     setRecords((prev) => [...prev, { query: q, answer: null, _pending: true }]);
 
-    askStream(q, currentSession.session_id, {
+    askStream(q, sid, {
       onChunk: (text) => setStreamingAnswer((prev) => prev + text),
       onDone: (data) => {
         setStreamingAnswer('');
@@ -450,11 +456,35 @@ export default function App() {
     } catch (e) { setError(e.message); }
   };
 
+  // ── 研报上传成功后自动创建会话并发起问答 ──
+  const handleReportAutoAsk = async (report) => {
+    if (!report || (report.status !== 'done' && !report.report_id)) return;
+    // 1. 关闭研报管理面板
+    setShowReportPanel(false);
+    // 2. 自动创建新会话（标题为研报标题）
+    try {
+      const session = await createSession(report.title || '研报分析');
+      setSessions((prev) => [session, ...prev]);
+      setCurrentSession(session);
+      setRecords([]);
+      setSearchResults(null);
+      // 3. 自动发起问答
+      const autoQuery = `请总结这篇研报的关键信息，包括：核心观点、投资评级、目标价、关键财务指标、风险提示。研报标题：${report.title || '未命名研报'}`;
+      setQuery(autoQuery);
+      // 直接用 session.session_id 发送，避免 state 异步问题
+      setTimeout(() => doSend(autoQuery, session.session_id), 0);
+    } catch (e) { setError(e.message); }
+  };
+
   const handleUploadReport = async (file) => {
     setReportUploading(true);
     try {
-      await uploadReport(file);
+      const result = await uploadReport(file);
       await loadReports();
+      // 上传成功且解析完成，弹出确认提示
+      if (result && result.status === 'done') {
+        setUploadedReport(result);
+      }
     } catch (e) { setError(e.message); } finally { setReportUploading(false); }
   };
 
@@ -462,9 +492,13 @@ export default function App() {
     if (!url.trim()) return;
     setReportUploading(true);
     try {
-      await importReportUrl(url.trim());
+      const result = await importReportUrl(url.trim());
       setReportUrl('');
       await loadReports();
+      // URL导入成功且解析完成，弹出确认提示
+      if (result && result.status === 'done') {
+        setUploadedReport(result);
+      }
     } catch (e) { setError(e.message); } finally { setReportUploading(false); }
   };
 
@@ -540,7 +574,7 @@ export default function App() {
               {searchResults.map((r, i) => (
                 <div key={i} className="record-card search-result-card">
                   <div className="record-q">Q: {r.query}</div>
-                  <div className="record-a">A: {r.answer?.slice(0, 200)}</div>
+                  <div className="record-a markdown-body"><ReactMarkdown remarkPlugins={[remarkGfm]}>{r.answer?.slice(0, 200) || ''}</ReactMarkdown></div>
                   <small>{r.timestamp}</small>
                 </div>
               ))}
@@ -572,7 +606,7 @@ export default function App() {
                       <div className="record-a streaming">
                         <span className="label">A</span>
                         {streamingAnswer ? (
-                          <span>{streamingAnswer}<span className="cursor">▌</span></span>
+                          <span className="markdown-body"><ReactMarkdown remarkPlugins={[remarkGfm]}>{streamingAnswer}</ReactMarkdown><span className="cursor">▌</span></span>
                         ) : (
                           <span className="typing">回答中…</span>
                         )}
@@ -618,9 +652,31 @@ export default function App() {
       {similarRecords && (
         <SimilarModal
           records={similarRecords.records}
-          onViewHistory={() => { setSimilarRecords(null); }}
+          onViewHistory={() => {
+            const firstRecord = similarRecords.records[0];
+            setSimilarRecords(null);
+            if (firstRecord?.session_id) {
+              const targetSession = sessions.find(s => s.session_id === firstRecord.session_id);
+              if (targetSession) {
+                setCurrentSession(targetSession);
+                setSearchResults(null);
+                loadRecords(targetSession.session_id);
+              }
+            }
+          }}
           onNewAsk={() => { const q = similarRecords.query; setSimilarRecords(null); setQuery(q); setTimeout(() => doSend(q), 0); }}
           onClose={() => setSimilarRecords(null)}
+          onRecordClick={(record) => {
+            setSimilarRecords(null);
+            if (record?.session_id) {
+              const targetSession = sessions.find(s => s.session_id === record.session_id);
+              if (targetSession) {
+                setCurrentSession(targetSession);
+                setSearchResults(null);
+                loadRecords(targetSession.session_id);
+              }
+            }
+          }}
         />
       )}
 
@@ -634,6 +690,27 @@ export default function App() {
           onDelete={handleDeleteReport} onClose={() => setShowReportPanel(false)}
           reportUrl={reportUrl} setReportUrl={setReportUrl} uploading={reportUploading}
         />
+      )}
+
+      {/* 研报解析完成确认弹窗 */}
+      {uploadedReport && (
+        <div className="report-confirm-overlay">
+          <div className="report-confirm-dialog">
+            <p>✅ 研报「{uploadedReport.title}」解析完成</p>
+            <p>是否现在查看研报关键信息？</p>
+            <div className="report-confirm-buttons">
+              <button className="btn-view" onClick={() => {
+                const report = uploadedReport;
+                setUploadedReport(null);
+                handleReportAutoAsk(report);
+              }}>查看</button>
+              <button className="btn-later" onClick={() => {
+                setUploadedReport(null);
+                loadReports();
+              }}>稍后</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* 指标对比面板 */}

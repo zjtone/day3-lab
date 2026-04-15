@@ -42,5 +42,16 @@
     "stock_codes": [],
     "status": "done",
     "created_at": "2026-04-15T04:09:09.714Z"
+  },
+  {
+    "report_id": "rpt_c5a91792147a",
+    "title": "H3_AP202604071821047878_1",
+    "source": "upload",
+    "format": "pdf",
+    "file_path": "/Users/zhangjh/train/group-workshop/group-7/zhangjunhu/code/backend/data/uploads/rpt_c5a91792147a.pdf",
+    "content_text": "[PDF解析不可用] 文件已保存，内容提取需要配置pdf-parse环境",
+    "stock_codes": [],
+    "status": "done",
+    "created_at": "2026-04-15T06:12:16.167Z"
   }
 ]

@@ -26,19 +26,5 @@
     "created_at": "2026-04-15T02:11:07.947Z",
     "updated_at": "2026-04-15T02:12:22.751Z",
     "query_count": 1
-  },
-  {
-    "session_id": "ac52436f-fe6d-433a-adb1-dd49bf09e74b",
-    "title": "新会话",
-    "created_at": "2026-04-15T03:34:24.672Z",
-    "updated_at": "2026-04-15T03:34:24.672Z",
-    "query_count": 0
-  },
-  {
-    "session_id": "cbb9324e-2d48-48cb-854f-326fe590587c",
-    "title": "新会话",
-    "created_at": "2026-04-15T03:49:47.627Z",
-    "updated_at": "2026-04-15T03:49:47.627Z",
-    "query_count": 0
   }
 ]
